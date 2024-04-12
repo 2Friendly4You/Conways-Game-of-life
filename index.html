@@ -4,169 +4,237 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Conways Game of life</title>
-
+    <title>Conways Game of Life</title>
     <style>
         html,
         body {
             height: 100%;
             margin: 0;
-            padding: 0px;
+            padding: 0;
             overflow: hidden;
+            color: #ddd;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #333;
         }
 
         #canvas {
-            width: 100%;
-            height: 100%;
-            background: #111;
+            background-color: #222;
+            display: block;
+            margin: 20px auto;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
+        }
+
+        #controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            background: rgba(50, 50, 50, 0.8);
+            padding: 20px;
+            border-radius: 10px;
+        }
+
+        button {
+            padding: 10px 20px;
+            background-color: #555;
+            color: #ddd;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        button:hover {
+            background-color: #777;
+            color: #fff;
+        }
+
+        input[type="range"],
+        input[type="number"] {
+            width: 150px;
+            cursor: pointer;
+        }
+
+        output {
+            color: #aaa;
+            font-size: 16px;
         }
     </style>
 </head>
 
 <body>
-    <canvas id="canvas"></canvas>
+    <canvas id="canvas" width="800px" height="800px"></canvas>
+    <div id="controls">
+        <button id="startButton">Start Simulation</button>
+        <button id="resetButton">Reset Grid</button>
+        <input id="speed" type="range" min="1" max="1000" value="100">
+        <output id="speedOutput">100 ms</output>
+        <input id="canvasWidth" type="number" placeholder="Width" value="800">
+        <input id="canvasHeight" type="number" placeholder="Height" value="800">
+        <button id="setSizeButton">Set Size</button>
+    </div>
 
     <script>
-        let canvas = document.getElementById("canvas")
-        let ctx = canvas.getContext('2d')
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const startButton = document.getElementById('startButton');
+        const resetButton = document.getElementById('resetButton');
+        const speedSlider = document.getElementById('speed');
+        const speedOutput = document.getElementById('speedOutput');
+        const canvasWidthInput = document.getElementById('canvasWidth');
+        const canvasHeightInput = document.getElementById('canvasHeight');
+        const setSizeButton = document.getElementById('setSizeButton');
 
-        let cameraOffset = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
-        let cameraZoom = 1
-        let MAX_ZOOM = 5
-        let MIN_ZOOM = 0.1
-        let SCROLL_SENSITIVITY = 0.0005
+        let speed = parseInt(speedSlider.value);
+        let simulationRunning = false;
 
-        function draw() {
-            canvas.width = window.innerWidth
-            canvas.height = window.innerHeight
+        const resolution = 10;
+        let COLS = Math.floor(canvas.width / resolution);
+        let ROWS = Math.floor(canvas.height / resolution);
 
-            // Translate to the canvas centre before zooming - so you'll always zoom on what you're looking directly at
-            ctx.translate(window.innerWidth / 2, window.innerHeight / 2)
-            ctx.scale(cameraZoom, cameraZoom)
-            ctx.translate(-window.innerWidth / 2 + cameraOffset.x, -window.innerHeight / 2 + cameraOffset.y)
-            ctx.clearRect(0, 0, window.innerWidth, window.innerHeight)
-            ctx.fillStyle = "#991111"
-            drawRect(-50, -50, 100, 100)
+        let grid = buildGrid(COLS, ROWS);
 
-            ctx.fillStyle = "#eecc77"
-            drawRect(-35, -35, 20, 20)
-            drawRect(15, -35, 20, 20)
-            drawRect(-35, 15, 70, 20)
-
-            ctx.fillStyle = "#fff"
-            drawText("Simple Pan and Zoom Canvas", -255, -100, 32, "courier")
-
-            ctx.rotate(-31 * Math.PI / 180)
-            ctx.fillStyle = `#${(Math.round(Date.now() / 40) % 4096).toString(16)}`
-            drawText("Now with touch!", -110, 100, 32, "courier")
-
-            ctx.fillStyle = "#fff"
-            ctx.rotate(31 * Math.PI / 180)
-
-            drawText("Wow, you found me!", -260, -2000, 48, "courier")
-
-            requestAnimationFrame(draw)
+        function buildGrid(cols, rows) {
+            return new Array(cols).fill(null)
+                .map(() => new Array(rows).fill(null)
+                    .map(() => 0)); // Start with all cells dead
         }
 
-        // Gets the relevant location from a mouse or single touch event
-        function getEventLocation(e) {
-            if (e.touches && e.touches.length == 1) {
-                return { x: e.touches[0].clientX, y: e.touches[0].clientY }
-            }
-            else if (e.clientX && e.clientY) {
-                return { x: e.clientX, y: e.clientY }
-            }
+        function setCanvasSize(width, height) {
+            canvas.width = width;
+            canvas.height = height;
+            document.body.style.overflow = 'auto'; // Enable scrollbars if needed
+            adjustGridSize();
         }
 
-        function drawRect(x, y, width, height) {
-            ctx.fillRect(x, y, width, height)
+        function adjustGridSize() {
+            COLS = Math.floor(canvas.width / resolution);
+            ROWS = Math.floor(canvas.height / resolution);
+            grid = buildGrid(COLS, ROWS);
+            render(); // Render the grid after resizing
         }
 
-        function drawText(text, x, y, size, font) {
-            ctx.font = `${size}px ${font}`
-            ctx.fillText(text, x, y)
+        function updateGrid() {
+            if (!simulationRunning) return;
+            grid = nextGen(grid);
+            setTimeout(updateGrid, speed);
         }
 
-        let isDragging = false
-        let dragStart = { x: 0, y: 0 }
+        function nextGen(grid) {
+            const nextGen = grid.map(arr => [...arr]);
 
-        function onPointerDown(e) {
-            isDragging = true
-            dragStart.x = getEventLocation(e).x / cameraZoom - cameraOffset.x
-            dragStart.y = getEventLocation(e).y / cameraZoom - cameraOffset.y
-        }
-
-        function onPointerUp(e) {
-            isDragging = false
-            initialPinchDistance = null
-            lastZoom = cameraZoom
-        }
-
-        function onPointerMove(e) {
-            if (isDragging) {
-                cameraOffset.x = getEventLocation(e).x / cameraZoom - dragStart.x
-                cameraOffset.y = getEventLocation(e).y / cameraZoom - dragStart.y
-            }
-        }
-
-        function handleTouch(e, singleTouchHandler) {
-            if (e.touches.length == 1) {
-                singleTouchHandler(e)
-            }
-            else if (e.type == "touchmove" && e.touches.length == 2) {
-                isDragging = false
-                handlePinch(e)
-            }
-        }
-
-        let initialPinchDistance = null
-        let lastZoom = cameraZoom
-
-        function handlePinch(e) {
-            e.preventDefault()
-
-            let touch1 = { x: e.touches[0].clientX, y: e.touches[0].clientY }
-            let touch2 = { x: e.touches[1].clientX, y: e.touches[1].clientY }
-
-            // This is distance squared, but no need for an expensive sqrt as it's only used in ratio
-            let currentDistance = (touch1.x - touch2.x) ** 2 + (touch1.y - touch2.y) ** 2
-
-            if (initialPinchDistance == null) {
-                initialPinchDistance = currentDistance
-            }
-            else {
-                adjustZoom(null, currentDistance / initialPinchDistance)
-            }
-        }
-
-        function adjustZoom(zoomAmount, zoomFactor) {
-            if (!isDragging) {
-                if (zoomAmount) {
-                    cameraZoom += zoomAmount
+            for (let col = 0; col < grid.length; col++) {
+                for (let row = 0; row < grid[col].length; row++) {
+                    let numNeighbours = 0;
+                    for (let i = -1; i <= 1; i++) {
+                        for (let j = -1; j <= 1; j++) {
+                            if (i === 0 && j === 0) continue;
+                            const x = col + i;
+                            const y = row + j;
+                            if (x >= 0 && y >= 0 && x < COLS && y < ROWS) {
+                                numNeighbours += grid[x][y];
+                            }
+                        }
+                    }
+                    const cell = grid[col][row];
+                    if (cell === 0 && numNeighbours === 3) {
+                        nextGen[col][row] = 1;
+                    } else if (cell === 1 && (numNeighbours < 2 || numNeighbours > 3)) {
+                        nextGen[col][row] = 0;
+                    }
                 }
-                else if (zoomFactor) {
-                    console.log(zoomFactor)
-                    cameraZoom = zoomFactor * lastZoom
+            }
+            return nextGen;
+        }
+
+        function render() {
+            requestAnimationFrame(render);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            for (let col = 0; col < grid.length; col++) {
+                for (let row = 0; row < grid[col].length; row++) {
+                    const cell = grid[col][row];
+                    ctx.fillStyle = cell ? 'white' : 'black';
+                    ctx.fillRect(col * resolution, row * resolution, resolution, resolution);
                 }
-
-                cameraZoom = Math.min(cameraZoom, MAX_ZOOM)
-                cameraZoom = Math.max(cameraZoom, MIN_ZOOM)
-
-                console.log(zoomAmount)
             }
         }
 
-        canvas.addEventListener('mousedown', onPointerDown)
-        canvas.addEventListener('touchstart', (e) => handleTouch(e, onPointerDown))
-        canvas.addEventListener('mouseup', onPointerUp)
-        canvas.addEventListener('touchend', (e) => handleTouch(e, onPointerUp))
-        canvas.addEventListener('mousemove', onPointerMove)
-        canvas.addEventListener('touchmove', (e) => handleTouch(e, onPointerMove))
-        canvas.addEventListener('wheel', (e) => adjustZoom(e.deltaY * SCROLL_SENSITIVITY))
+        let previouseCell = { x: -1, y: -1 };
 
-        // Ready, set, go
-        draw()
+        function toggleCellState(x, y) {
+            const col = Math.floor(x / resolution);
+            const row = Math.floor(y / resolution);
+            if (col >= 0 && col < COLS && row >= 0 && row < ROWS) {
+                grid[col][row] = grid[col][row] ? 0 : 1; // Toggle cell state
+            }
+
+            previouseCell = { x: col, y: row };
+            console.log(previouseCell);
+        }
+
+        setSizeButton.onclick = function () {
+            const width = parseInt(canvasWidthInput.value) || 800; // Use default if NaN
+            const height = parseInt(canvasHeightInput.value) || 800; // Use default if NaN
+            setCanvasSize(width, height);
+        };
+
+
+        canvas.addEventListener('mousedown', (event) => {
+            if (event.button === 0 && !simulationRunning) { // Left button for drawing
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width; // Calculate the scale factors
+                const scaleY = canvas.height / rect.height;
+                const canvasX = (event.clientX - rect.left) * scaleX; // Adjust mouse coordinates
+                const canvasY = (event.clientY - rect.top) * scaleY;
+                if (previouseCell.x === (Math.floor(canvasX/resolution)) && previouseCell.y === (Math.floor(canvasY/resolution))) {
+                    return;
+                }
+                toggleCellState(canvasX, canvasY);
+            }
+            event.preventDefault();
+        });
+
+        canvas.addEventListener('mousemove', (event) => {
+            if (event.buttons === 1 && !simulationRunning) {
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                const canvasX = (event.clientX - rect.left) * scaleX;
+                const canvasY = (event.clientY - rect.top) * scaleY;
+                if (previouseCell.x === (Math.floor(canvasX/resolution)) && previouseCell.y === (Math.floor(canvasY/resolution))) {
+                    console.log("same cell");
+                    return;
+                }
+                toggleCellState(canvasX, canvasY);
+            }
+        });
+
+        canvas.addEventListener('mouseup', () => { });
+        canvas.addEventListener('mouseout', () => { });
+
+        canvas.addEventListener('contextmenu', event => event.preventDefault()); // Prevent context menu on right click
+
+        startButton.onclick = function () {
+            simulationRunning = true;
+            updateGrid();
+        };
+
+        resetButton.onclick = function () {
+            simulationRunning = false;
+            grid = buildGrid(COLS, ROWS); // Update grid with the new dimensions
+            render(); // Render the updated grid
+        };
+
+        speedSlider.oninput = function () {
+            speed = parseInt(this.value);
+            speedOutput.value = speed + " ms";
+        };
+
+        requestAnimationFrame(render);
     </script>
+
 </body>
 
 </html>
